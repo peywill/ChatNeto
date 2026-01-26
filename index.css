@@ -413,10 +413,6 @@
     position: absolute;
   }
 
-  .fixed {
-    position: fixed;
-  }
-
   .relative {
     position: relative;
   }
@@ -1171,12 +1167,6 @@
 
   .disabled\:opacity-50:disabled {
     opacity: .5;
-  }
-
-  @media (width >= 48rem) {
-    .md\:absolute {
-      position: absolute;
-    }
   }
 
   @media (width >= 48rem) {

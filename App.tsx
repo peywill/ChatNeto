@@ -21,55 +21,6 @@ import {
   searchUsers
 } from './lib/chat';
 
-// ULTRA-AGGRESSIVE VIEWPORT FIX - Run BEFORE anything else
-(function forceViewportFix() {
-  if (typeof document === 'undefined') return;
-  
-  // Remove ALL existing viewport meta tags
-  const existingMetas = document.querySelectorAll('meta[name="viewport"]');
-  existingMetas.forEach(meta => meta.remove());
-  
-  // Create new viewport meta tag with maximum compatibility
-  const viewportMeta = document.createElement('meta');
-  viewportMeta.name = 'viewport';
-  viewportMeta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover';
-  
-  // Force insert at the very top of <head>
-  const head = document.head || document.getElementsByTagName('head')[0];
-  if (head) {
-    if (head.firstChild) {
-      head.insertBefore(viewportMeta, head.firstChild);
-    } else {
-      head.appendChild(viewportMeta);
-    }
-  }
-  
-  // Force mobile layout styles
-  document.documentElement.style.setProperty('width', '100vw', 'important');
-  document.documentElement.style.setProperty('overflow-x', 'hidden', 'important');
-  
-  if (document.body) {
-    document.body.style.setProperty('width', '100vw', 'important');
-    document.body.style.setProperty('overflow-x', 'hidden', 'important');
-    document.body.style.setProperty('margin', '0', 'important');
-    document.body.style.setProperty('padding', '0', 'important');
-  } else {
-    // If body doesn't exist yet, wait for it
-    const observer = new MutationObserver((mutations, obs) => {
-      if (document.body) {
-        document.body.style.setProperty('width', '100vw', 'important');
-        document.body.style.setProperty('overflow-x', 'hidden', 'important');
-        document.body.style.setProperty('margin', '0', 'important');
-        document.body.style.setProperty('padding', '0', 'important');
-        obs.disconnect();
-      }
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-  }
-  
-  console.log('✅ AGGRESSIVE VIEWPORT FIX APPLIED');
-})();
-
 type Screen = 'login' | 'signup' | 'profile-setup' | 'chat-list' | 'chat' | 'contacts' | 'user-profile';
 
 interface ChatDisplay {
@@ -735,23 +686,43 @@ function App() {
     ? chats.find(c => c.id === currentChatId)
     : null;
   
-  // If we're on the chat screen but don't have chat data yet, create a temporary chat object
-  const chatToDisplay = currentChat || (currentChatId && currentOtherUserId && currentScreen === 'chat' ? {
+  // If we're on the chat screen but don't have chat data yet, fetch it from the database
+  const [otherUserProfile, setOtherUserProfile] = useState<Profile | null>(null);
+  
+  useEffect(() => {
+    async function fetchOtherUserProfile() {
+      if (currentScreen === 'chat' && currentOtherUserId && !currentChat) {
+        console.log('🔍 Fetching other user profile for:', currentOtherUserId);
+        const profile = await getUserProfile(currentOtherUserId);
+        if (profile) {
+          console.log('✅ Loaded other user profile:', profile.name);
+          setOtherUserProfile(profile);
+        }
+      } else {
+        setOtherUserProfile(null);
+      }
+    }
+    
+    fetchOtherUserProfile();
+  }, [currentScreen, currentOtherUserId, currentChat]);
+  
+  // Create display object for chat - use real data if available, otherwise use fetched profile
+  const chatToDisplay = currentChat || (otherUserProfile && currentChatId ? {
     id: currentChatId,
-    name: 'Loading...',
-    avatar: 'bg-gray-400',
+    name: otherUserProfile.name,
+    avatar: otherUserProfile.avatar,
     lastMessage: '',
     timestamp: '',
     unread: 0,
-    online: false,
-    otherUserId: currentOtherUserId,
+    online: isUserOnline(otherUserProfile.last_seen),
+    otherUserId: otherUserProfile.id,
   } : null);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="w-full max-w-md mx-auto">
-          <div className="fixed inset-0 w-full h-full flex flex-col items-center justify-center bg-white md:relative md:inset-auto md:h-auto">
+          <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-white md:relative md:inset-auto md:h-auto">
             <div className="text-gray-500 text-lg mb-2">Loading ChatNeto...</div>
             <div className="text-gray-400 text-sm">Connecting to server</div>
           </div>
@@ -763,10 +734,10 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center">
       <div className="w-full max-w-md mx-auto h-screen md:h-auto md:my-8 relative">
-        <div className="fixed inset-0 w-full h-full bg-white overflow-hidden md:relative md:inset-auto md:rounded-lg md:shadow-xl md:h-[600px]">
+        <div className="absolute inset-0 w-full h-full bg-white overflow-hidden md:relative md:inset-auto md:rounded-lg md:shadow-xl md:h-[600px]">
           {/* Offline/Online Banner */}
           {!isOnline && (
-            <div className="fixed top-0 left-0 right-0 bg-red-500 text-white text-center py-2 px-4 z-50 text-sm md:absolute md:rounded-t-lg">
+            <div className="absolute top-0 left-0 right-0 bg-red-500 text-white text-center py-2 px-4 z-50 text-sm md:rounded-t-lg">
               📵 No internet connection
             </div>
           )}
