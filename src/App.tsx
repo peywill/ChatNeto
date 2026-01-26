@@ -735,16 +735,36 @@ function App() {
     ? chats.find(c => c.id === currentChatId)
     : null;
   
-  // If we're on the chat screen but don't have chat data yet, create a temporary chat object
-  const chatToDisplay = currentChat || (currentChatId && currentOtherUserId && currentScreen === 'chat' ? {
+  // If we're on the chat screen but don't have chat data yet, fetch it from the database
+  const [otherUserProfile, setOtherUserProfile] = useState<Profile | null>(null);
+  
+  useEffect(() => {
+    async function fetchOtherUserProfile() {
+      if (currentScreen === 'chat' && currentOtherUserId && !currentChat) {
+        console.log('🔍 Fetching other user profile for:', currentOtherUserId);
+        const profile = await getUserProfile(currentOtherUserId);
+        if (profile) {
+          console.log('✅ Loaded other user profile:', profile.name);
+          setOtherUserProfile(profile);
+        }
+      } else {
+        setOtherUserProfile(null);
+      }
+    }
+    
+    fetchOtherUserProfile();
+  }, [currentScreen, currentOtherUserId, currentChat]);
+  
+  // Create display object for chat - use real data if available, otherwise use fetched profile
+  const chatToDisplay = currentChat || (otherUserProfile && currentChatId ? {
     id: currentChatId,
-    name: 'Loading...',
-    avatar: 'bg-gray-400',
+    name: otherUserProfile.name,
+    avatar: otherUserProfile.avatar,
     lastMessage: '',
     timestamp: '',
     unread: 0,
-    online: false,
-    otherUserId: currentOtherUserId,
+    online: isUserOnline(otherUserProfile.last_seen),
+    otherUserId: otherUserProfile.id,
   } : null);
 
   if (loading) {
