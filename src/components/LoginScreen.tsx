@@ -30,7 +30,7 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
   };
 
   return (
-    <div className="fixed inset-0 w-full h-full flex flex-col items-center justify-center bg-white p-6 overflow-y-auto">
+    <div className="h-full w-full flex flex-col items-center justify-center bg-white p-6 overflow-y-auto">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
           <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center mb-3" style={{ width: '48px', height: '48px' }}>

@@ -25,7 +25,7 @@ export function ContactsScreen({ contacts, onBack, onContactClick }: ContactsScr
   );
 
   return (
-    <div className="fixed inset-0 w-full h-full flex flex-col bg-white">
+    <div className="h-full w-full flex flex-col bg-white">
       {/* Header */}
       <div className="bg-blue-500 text-white px-4 py-3 flex-shrink-0">
         <div className="flex items-center gap-3 mb-3">

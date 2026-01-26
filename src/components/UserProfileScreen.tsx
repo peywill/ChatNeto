@@ -42,7 +42,7 @@ export function UserProfileScreen({ user, onBack, onUpdateProfile, onLogout }: U
   };
 
   return (
-    <div className="fixed inset-0 w-full h-full flex flex-col bg-gray-50">
+    <div className="h-full w-full flex flex-col bg-gray-50">
       {/* Header */}
       <div className="bg-blue-500 text-white px-4 py-3 flex items-center justify-between flex-shrink-0">
         <button onClick={onBack}>

@@ -47,7 +47,7 @@ export function ChatScreen({
   };
 
   return (
-    <div className="fixed inset-0 w-full h-full flex flex-col bg-gray-50">
+    <div className="h-full w-full flex flex-col bg-gray-50">
       {/* Header */}
       <div className="bg-blue-500 text-white px-4 py-3 flex items-center gap-3">
         <button onClick={onBack}>

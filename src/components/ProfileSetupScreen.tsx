@@ -29,7 +29,7 @@ export function ProfileSetupScreen({ initialName, onComplete }: ProfileSetupScre
   };
 
   return (
-    <div className="fixed inset-0 w-full h-full flex flex-col bg-white overflow-y-auto">
+    <div className="h-full w-full flex flex-col bg-white overflow-y-auto">
       <div className="flex-1 flex flex-col justify-center px-6 py-8">
         <div className="mb-8 text-center">
           <h1 className="text-2xl mb-2 font-semibold text-gray-800">Profile Setup</h1>
