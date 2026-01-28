@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ChatNetoLogo } from './ChatNetoLogo';
 import { signIn } from '../lib/auth';
 
@@ -12,6 +12,11 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isMounted, setIsMounted] = useState(true);
+
+  useEffect(() => {
+    return () => { setIsMounted(false); };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,12 +24,25 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
       setLoading(true);
       setError('');
       try {
-        await signIn(email, password);
+        // Create a timeout promise
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timed out. Please check your internet connection.')), 15000)
+        );
+
+        // Race between sign in and timeout
+        await Promise.race([
+          signIn(email, password),
+          timeoutPromise
+        ]);
+        
         onLogin(email, password);
       } catch (err: any) {
+        console.error('Login error:', err);
         setError(err.message || 'Failed to sign in');
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     }
   };
