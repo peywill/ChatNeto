@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { Toaster, toast } from 'sonner';
 import { supabase } from './lib/supabase';
 import type { Profile } from './lib/supabase-types';
 import { LoginScreen } from './components/LoginScreen';
@@ -40,6 +41,8 @@ interface MessageDisplay {
   timestamp: string;
   sent: boolean;
   read?: boolean;
+  sending?: boolean;
+  error?: boolean;
 }
 
 interface ContactDisplay {
@@ -592,6 +595,9 @@ function App() {
   const handleChatClick = (chatId: string) => {
     const chat = chats.find(c => c.id === chatId);
     if (chat) {
+      // Force update online status when entering a chat
+      if (user) updateLastSeen(user.id);
+      
       setCurrentChatId(chatId);
       setCurrentOtherUserId(chat.otherUserId);
       setCurrentScreen('chat');
@@ -647,26 +653,55 @@ function App() {
   const handleSendMessage = async (text: string) => {
     if (!currentChatId || !user) return;
     
+    // Create a temporary ID for the optimistic message
+    const tempId = `temp-${Date.now()}`;
+    const now = new Date();
+    const timestamp = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    
+    // 1. Optimistically add message to UI
+    const optimisticMessage: MessageDisplay = {
+      id: tempId,
+      text: text,
+      timestamp: timestamp,
+      sent: true,
+      read: false,
+      sending: true, // Show as sending
+    };
+    
+    setMessages(prev => [...prev, optimisticMessage]);
+    
     try {
       console.log('📤 Sending message:', text);
+      
+      // Update last seen to ensure we appear online
+      updateLastSeen(user.id);
+      
       const newMessage = await sendMessage(currentChatId, user.id, text);
       console.log('✅ Message sent:', newMessage);
       
-      // Immediately add the message to the UI (optimistic update)
-      const messageDisplay = {
-        id: newMessage.id,
-        text: newMessage.text,
-        timestamp: formatTimestamp(newMessage.created_at),
-        sent: true, // Sender's message
-        read: newMessage.read,
-      };
+      // 2. Update the message with real ID and remove sending state
+      setMessages(prev => prev.map(msg => 
+        msg.id === tempId 
+          ? {
+              ...msg,
+              id: newMessage.id,
+              timestamp: formatTimestamp(newMessage.created_at),
+              sending: false,
+            }
+          : msg
+      ));
       
-      setMessages(prev => [...prev, messageDisplay]);
-      console.log('✅ Message added to UI');
+      console.log('✅ Message updated in UI');
       
-      // The subscription will handle adding the message for the receiver
+      // The subscription will also receive it, but our dedup logic handles that
     } catch (error) {
       console.error('❌ Error sending message:', error);
+      toast.error('Failed to send message. Please check your connection.');
+      
+      // Mark message as failed
+      setMessages(prev => prev.map(msg => 
+        msg.id === tempId ? { ...msg, sending: false, error: true } : msg
+      ));
     }
   };
 
@@ -721,6 +756,7 @@ function App() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <Toaster position="top-center" />
         <div className="w-full max-w-md mx-auto">
           <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-white md:relative md:inset-auto md:h-auto">
             <div className="text-gray-500 text-lg mb-2">Loading ChatNeto...</div>
@@ -732,9 +768,10 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-      <div className="w-full max-w-md mx-auto h-screen md:h-auto md:my-8 relative">
-        <div className="absolute inset-0 w-full h-full bg-white overflow-hidden md:relative md:inset-auto md:rounded-lg md:shadow-xl md:h-[600px]">
+    <div className="fixed inset-0 w-full h-full bg-gray-100 flex items-center justify-center overflow-hidden">
+      <div className="w-full h-full md:max-w-md md:h-[600px] md:my-8 relative bg-white md:rounded-lg shadow-xl overflow-hidden">
+        <Toaster position="top-center" />
+        <div className="absolute inset-0 w-full h-full bg-white overflow-hidden md:relative md:inset-auto md:h-full">
           {/* Offline/Online Banner */}
           {!isOnline && (
             <div className="absolute top-0 left-0 right-0 bg-red-500 text-white text-center py-2 px-4 z-50 text-sm md:rounded-t-lg">

@@ -175,7 +175,7 @@ export function isUserOnline(lastSeen: string | undefined): boolean {
   const now = new Date();
   const diffMinutes = (now.getTime() - lastSeenDate.getTime()) / (1000 * 60);
   
-  // Consider user online if they were active within last 5 minutes (increased from 2)
-  // This gives more tolerance for the 30-second update interval
-  return diffMinutes < 5;
+  // Consider user online if they were active within last 10 minutes (increased from 5)
+  // This gives more tolerance for mobile browsers backgrounding the app
+  return diffMinutes < 10;
 }

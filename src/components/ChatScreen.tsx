@@ -8,6 +8,8 @@ export interface Message {
   timestamp: string;
   sent: boolean;
   read?: boolean;
+  sending?: boolean;
+  error?: boolean;
 }
 
 interface ChatScreenProps {
@@ -79,7 +81,12 @@ export function ChatScreen({
           </div>
         ) : (
           messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <div key={message.id} className={message.sending ? "opacity-70" : ""}>
+              <MessageBubble message={message} />
+              {message.error && (
+                <div className="text-xs text-red-500 text-right px-2">Failed to send</div>
+              )}
+            </div>
           ))
         )}
         <div ref={messagesEndRef} />
