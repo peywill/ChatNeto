@@ -3,73 +3,94 @@ import type { Chat, Message, Contact, Profile } from './supabase-types';
 
 // Chat functions
 export async function getOrCreateChat(userId: string, otherUserId: string): Promise<Chat> {
+  console.log(`🔵 getOrCreateChat: ${userId} <-> ${otherUserId}`);
   try {
-    // Ensure participant1_id < participant2_id for the unique constraint
-    const [participant1, participant2] = [userId, otherUserId].sort();
+    // 1. Try to find existing chat using chat_participants
+    const { data: myChats } = await supabase
+      .from('chat_participants')
+      .select('chat_id')
+      .eq('user_id', userId);
 
-    // Check if chat exists
-    const { data: existingChat } = await supabase
-      .from('chats')
-      .select('*')
-      .eq('participant1_id', participant1)
-      .eq('participant2_id', participant2)
-      .single();
+    if (myChats && myChats.length > 0) {
+        const myChatIds = myChats.map(c => c.chat_id);
 
-    if (existingChat) {
-      return existingChat;
+        // Try to find a chat where the other user is also a participant
+        const { data: commonChats } = await supabase
+           .from('chat_participants')
+           .select('chat_id')
+           .eq('user_id', otherUserId)
+           .in('chat_id', myChatIds)
+           .limit(1);
+
+        if (commonChats && commonChats.length > 0) {
+            const existingChatId = commonChats[0].chat_id;
+            const { data: existingChat } = await supabase
+                .from('chats')
+                .select('*')
+                .eq('id', existingChatId)
+                .maybeSingle(); 
+                
+            if (existingChat) {
+                console.log('✅ Found existing chat via participants:', existingChatId);
+                return existingChat;
+            }
+        }
     }
 
-    // Create new chat
+    // 2. Fallback: Create new chat
+    console.log('🔵 Creating new chat...');
+    
+    // Sort participants to ensure consistency (P1 < P2) for 1-on-1 chats
+    const [p1, p2] = [userId, otherUserId].sort();
+
     const { data: newChat, error } = await supabase
       .from('chats')
       .insert({
-        participant1_id: participant1,
-        participant2_id: participant2,
+        participant1_id: p1,
+        participant2_id: p2,
+        last_message: 'New chat',
+        last_message_at: new Date().toISOString()
       })
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error) throw error;
+    if (error) {
+         if (!error.message?.includes('fetch')) {
+             console.error("Chat creation error:", error);
+         }
+         throw error;
+    }
+
+    if (!newChat) {
+        throw new Error('Chat created but could not be retrieved (RLS policy?)');
+    }
+
+    // 3. Add participants
+    const { error: partError } = await supabase
+      .from('chat_participants')
+      .insert([
+        { chat_id: newChat.id, user_id: userId },
+        { chat_id: newChat.id, user_id: otherUserId }
+      ]);
+      
+    if (partError) {
+        if (!partError.message?.includes('fetch')) {
+            console.error('Error adding participants:', partError);
+        }
+    }
+
     return newChat;
+
   } catch (error: any) {
-    // Ignore abort errors
-    if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
-      console.log('Get or create chat aborted (this is normal)');
-      throw error; // Re-throw to let caller handle
+    if (!error?.message?.includes('fetch') && !error?.message?.includes('network')) {
+        console.error('getOrCreateChat error:', error);
     }
     throw error;
   }
 }
 
 export async function getUserChats(userId: string) {
-  try {
-    const { data, error } = await supabase
-      .from('chats')
-      .select(`
-        *,
-        participant1:profiles!chats_participant1_id_fkey(*),
-        participant2:profiles!chats_participant2_id_fkey(*)
-      `)
-      .or(`participant1_id.eq.${userId},participant2_id.eq.${userId}`)
-      .order('last_message_at', { ascending: false, nullsFirst: false });
-
-    if (error) {
-      // Ignore abort errors
-      if (error.message?.includes('aborted') || error.name === 'AbortError') {
-        console.log('Get chats aborted (this is normal)');
-        return [];
-      }
-      throw error;
-    }
-    return data || [];
-  } catch (error: any) {
-    // Ignore abort errors
-    if (error.message?.includes('aborted') || error.name === 'AbortError') {
-      console.log('Get chats aborted (this is normal)');
-      return [];
-    }
-    throw error;
-  }
+  return [];
 }
 
 // Message functions
@@ -82,25 +103,23 @@ export async function getChatMessages(chatId: string) {
       .order('created_at', { ascending: true });
 
     if (error) {
-      // Ignore abort errors
-      if (error.message?.includes('aborted') || error.name === 'AbortError') {
-        console.log('Get messages aborted (this is normal)');
-        return [];
-      }
-      throw error;
-    }
-    return data || [];
-  } catch (error: any) {
-    // Ignore abort errors
-    if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
-      console.log('Get messages aborted (this is normal)');
       return [];
     }
-    throw error;
+    return data || [];
+  } catch (error) {
+    return [];
   }
 }
 
 export async function sendMessage(chatId: string, senderId: string, text: string) {
+  await supabase
+    .from('chats')
+    .update({ 
+        last_message: text,
+        last_message_at: new Date().toISOString()
+    })
+    .eq('id', chatId);
+
   const { data, error } = await supabase
     .from('messages')
     .insert({
@@ -116,119 +135,41 @@ export async function sendMessage(chatId: string, senderId: string, text: string
 }
 
 export async function markMessagesAsRead(chatId: string, userId: string) {
-  const { error } = await supabase
-    .from('messages')
-    .update({ read: true })
-    .eq('chat_id', chatId)
-    .neq('sender_id', userId);
-
-  if (error) throw error;
+  try {
+    await supabase
+        .from('messages')
+        .update({ read: true })
+        .eq('chat_id', chatId)
+        .neq('sender_id', userId)
+        .eq('read', false); // Only update unread ones
+  } catch (e: any) {
+      if (!e?.message?.includes('fetch')) {
+          console.log('Error marking read', e);
+      }
+  }
 }
 
-// Contact functions
-export async function getUserContacts(userId: string) {
-  const { data, error } = await supabase
-    .from('contacts')
-    .select(`
-      *,
-      contact:profiles!contacts_contact_id_fkey(*)
-    `)
-    .eq('user_id', userId);
-
-  if (error) throw error;
-  return data || [];
-}
-
-export async function addContact(userId: string, contactId: string) {
-  const { data, error } = await supabase
-    .from('contacts')
-    .insert({
-      user_id: userId,
-      contact_id: contactId,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
+export async function getUserProfile(userId: string): Promise<Profile | null> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
   return data;
 }
 
-export async function removeContact(userId: string, contactId: string) {
-  const { error } = await supabase
-    .from('contacts')
-    .delete()
-    .eq('user_id', userId)
-    .eq('contact_id', contactId);
-
-  if (error) throw error;
-}
-
-export async function searchUsers(query: string, currentUserId: string) {
-  try {
-    let queryBuilder = supabase
-      .from('profiles')
-      .select('*')
-      .neq('id', currentUserId);
-    
-    // Only add search filter if query is not empty
-    if (query && query.trim()) {
-      queryBuilder = queryBuilder.or(`name.ilike.%${query}%,email.ilike.%${query}%`);
-    }
-    
-    const { data, error } = await queryBuilder
-      .order('name', { ascending: true })
-      .limit(20);
-
-    if (error) {
-      // Ignore abort errors
-      if (error.message?.includes('aborted') || error.name === 'AbortError') {
-        return [];
-      }
-      throw error;
-    }
-    
-    // Return all users found (or empty array)
-    return data || [];
-  } catch (error: any) {
-    // Ignore abort errors
-    if (error.message?.includes('aborted') || error.name === 'AbortError') {
-      return [];
-    }
-    throw error;
+// Subscriptions
+// UPDATED: Now handles messages, updates (read receipts), and typing
+export function subscribeToChat(
+  chatId: string, 
+  callbacks: {
+    onMessage: (message: Message) => void;
+    onMessageUpdate: (message: Message) => void;
+    onTyping: (userId: string) => void;
   }
-}
-
-// Get a specific user's profile (used for getting chat participant info with last_seen)
-export async function getUserProfile(userId: string): Promise<Profile | null> {
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (error) {
-      if (error.message?.includes('aborted') || error.name === 'AbortError') {
-        return null;
-      }
-      throw error;
-    }
-    
-    return data;
-  } catch (error: any) {
-    if (error.message?.includes('aborted') || error.name === 'AbortError') {
-      return null;
-    }
-    throw error;
-  }
-}
-
-// Real-time subscriptions
-export function subscribeToMessages(chatId: string, onMessage: (message: Message) => void) {
-  console.log('🔔 Setting up message subscription for chat:', chatId);
-  
+) {
   const channel = supabase
-    .channel(`messages:${chatId}`)
+    .channel(`chat:${chatId}`)
     .on(
       'postgres_changes',
       {
@@ -238,48 +179,51 @@ export function subscribeToMessages(chatId: string, onMessage: (message: Message
         filter: `chat_id=eq.${chatId}`,
       },
       (payload) => {
-        console.log('🔔 Real-time message received:', payload);
-        onMessage(payload.new as Message);
-      }
-    )
-    .subscribe((status) => {
-      console.log('🔔 Subscription status:', status);
-    });
-
-  return () => {
-    console.log('🔔 Unsubscribing from messages:', chatId);
-    supabase.removeChannel(channel);
-  };
-}
-
-export function subscribeToChats(userId: string, onChatUpdate: () => void) {
-  const channel = supabase
-    .channel(`chats:${userId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'chats',
-      },
-      () => {
-        onChatUpdate();
+        callbacks.onMessage(payload.new as Message);
       }
     )
     .on(
       'postgres_changes',
       {
-        event: '*',
+        event: 'UPDATE',
         schema: 'public',
         table: 'messages',
+        filter: `chat_id=eq.${chatId}`,
       },
-      () => {
-        onChatUpdate();
+      (payload) => {
+        callbacks.onMessageUpdate(payload.new as Message);
+      }
+    )
+    .on(
+      'broadcast',
+      { event: 'typing' },
+      (payload) => {
+        if (payload.payload && payload.payload.userId) {
+          callbacks.onTyping(payload.payload.userId);
+        }
       }
     )
     .subscribe();
 
-  return () => {
-    supabase.removeChannel(channel);
+  return {
+    unsubscribe: () => {
+      supabase.removeChannel(channel);
+    },
+    sendTyping: (userId: string) => {
+      channel.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { userId },
+      });
+    }
   };
+}
+
+// Deprecated: kept for backward compatibility if needed, but subscribeToChat is preferred
+export function subscribeToMessages(chatId: string, onMessage: (message: Message) => void) {
+  return subscribeToChat(chatId, {
+    onMessage,
+    onMessageUpdate: () => {},
+    onTyping: () => {}
+  }).unsubscribe;
 }

@@ -1,181 +1,209 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { ChatListScreen, Chat } from './ChatListScreen';
-import { supabase } from '../lib/auth';
-import { usePresence } from '../lib/presence';
+import { supabase, isUserOnline } from '../lib/auth';
 
 interface ChatListProps {
+  onlineUsers: Set<string>;
   onSelectChat: (chat: any) => void;
   onOpenContacts: () => void;
   onOpenProfile: () => void;
 }
 
-export function ChatList({ onSelectChat, onOpenContacts, onOpenProfile }: ChatListProps) {
-  const [chats, setChats] = useState<Chat[]>([]);
+export function ChatList({ onlineUsers, onSelectChat, onOpenContacts, onOpenProfile }: ChatListProps) {
+  const [chats, setChats] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState({ name: '', avatar: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Custom hook to track who is online
-  const onlineUsers = usePresence();
-  
-  // Use ref to track mounted state
   const isMounted = useRef(true);
+  
+  // 1. Fetch Data Logic
+  const fetchChats = async () => {
+    // Optimization: Don't fetch if tab is hidden (saves battery and reduces errors)
+    if (document.hidden && chats.length > 0) return;
 
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Parallelize Profile and Chats fetching
+      const [profileResult, participationsResult] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', user.id).single(),
+        supabase.from('chat_participants').select('chat_id').eq('user_id', user.id)
+      ]);
+
+      const profile = profileResult.data;
+      if (profile && isMounted.current) {
+        setCurrentUser({ 
+          name: profile.name || 'User', 
+          avatar: profile.avatar || 'bg-blue-400' 
+        });
+      }
+
+      const myParticipations = participationsResult.data;
+      if (!myParticipations || myParticipations.length === 0) {
+        if (isMounted.current) {
+            setChats([]);
+            setLoading(false);
+        }
+        return;
+      }
+
+      const myChatIds = myParticipations.map(c => c.chat_id);
+
+      // Fetch Participants for these chats
+      const { data: allParticipants } = await supabase
+         .from('chat_participants')
+         .select('chat_id, user_id')
+         .in('chat_id', myChatIds);
+         
+      if (!allParticipants) throw new Error('Failed to load participants');
+
+      // Identify Partners
+      const partnerRows = allParticipants.filter(p => p.user_id !== user.id);
+      const partnerUserIds = [...new Set(partnerRows.map(p => p.user_id))];
+      
+      // Fetch Partner Profiles (including last_seen)
+      let profilesMap: Record<string, any> = {};
+      if (partnerUserIds.length > 0) {
+          const { data: profiles } = await supabase
+              .from('profiles')
+              .select('*')
+              .in('id', partnerUserIds);
+          
+          if (profiles) {
+              profiles.forEach(p => profilesMap[p.id] = p);
+          }
+      }
+
+      // Fetch Messages in Parallel
+      const chatPromises = myChatIds.map(async (chatId) => {
+          const partnerRow = partnerRows.find(p => p.chat_id === chatId);
+          const partnerId = partnerRow?.user_id;
+          const partnerProfile = partnerId ? profilesMap[partnerId] : null;
+
+          // Default values
+          let lastMsgText = 'No messages yet';
+          let lastMsgTime = '1970-01-01T00:00:00Z';
+          let unreadCount = 0;
+
+          try {
+              const [msgRes, unreadRes] = await Promise.all([
+                  supabase.from('messages')
+                    .select('text, created_at')
+                    .eq('chat_id', chatId)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle(),
+                  supabase.from('messages')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('chat_id', chatId)
+                    .eq('read', false)
+                    .neq('sender_id', user.id)
+              ]);
+
+              if (msgRes.data) {
+                  lastMsgText = msgRes.data.text;
+                  lastMsgTime = msgRes.data.created_at;
+              }
+              if (unreadRes.count) {
+                  unreadCount = unreadRes.count;
+              }
+          } catch (e: any) {
+              const msg = e?.message || '';
+              if (!msg.includes('fetch') && !msg.includes('abort')) {
+                  console.warn(`Failed to fetch details for chat ${chatId}`, e);
+              }
+          }
+
+          return {
+              id: chatId,
+              name: partnerProfile?.name || 'Unknown User',
+              avatar: partnerProfile?.avatar || 'bg-gray-400',
+              lastMessage: lastMsgText,
+              timestamp: lastMsgTime,
+              unread: unreadCount,
+              online: false, // Computed in render
+              isOnline: false, // Computed in render
+              participantId: partnerId,
+              lastSeen: partnerProfile?.last_seen // Store for fallback
+          };
+      });
+
+      const formattedChats = await Promise.all(chatPromises);
+
+      // Sort by newest
+      formattedChats.sort((a, b) => 
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+
+      if (isMounted.current) {
+        setChats(formattedChats);
+        setLoading(false);
+      }
+
+    } catch (err: any) {
+      const msg = err?.message || '';
+      const isAbort = err?.name === 'AbortError' || msg.includes('aborted');
+      const isNetwork = msg.includes('fetch') || msg.includes('network') || err?.name === 'TypeError';
+      
+      if (!isAbort && !isNetwork) {
+          console.error('Error fetching chats:', err);
+      }
+      
+      if (isMounted.current) {
+          if (chats.length === 0 && !isAbort) {
+               setError('Failed to load chats');
+          }
+          setLoading(false);
+      }
+    }
+  };
+
+  // 2. Lifecycle
   useEffect(() => {
     isMounted.current = true;
     
-    // Safety timeout in case initial fetch hangs forever
-    const safetyTimer = setTimeout(() => {
-      if (isMounted.current && loading) {
-        console.warn('ChatList fetch timed out');
-        setLoading(false);
-        // Don't set error, just show empty list which is better than infinite spinner
-      }
-    }, 5000);
+    // Initial fetch
+    fetchChats();
     
-    const fetchData = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user || !isMounted.current) return;
+    // Poll every 15s
+    const interval = setInterval(fetchChats, 15000);
 
-        // 1. Fetch My Profile
-        // Added timeout to profile fetch too
-        const profilePromise = supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-          
-        const { data: profile } = await profilePromise;
-          
-        if (profile && isMounted.current) {
-          setCurrentUser({ 
-            name: profile.name || 'User', 
-            avatar: profile.avatar || 'bg-blue-400' 
-          });
+    // Smart Polling: Refresh immediately when tab becomes visible
+    const handleVisibilityChange = () => {
+        if (!document.hidden) {
+            // console.log('Tab visible, refreshing chats...');
+            fetchChats();
         }
-
-        // 2. Fetch My Chats
-        const { data: myParticipations, error: myChatsError } = await supabase
-          .from('chat_participants')
-          .select('chat_id')
-          .eq('user_id', user.id);
-
-        if (myChatsError) throw myChatsError;
-
-        if (!myParticipations || myParticipations.length === 0) {
-          if (isMounted.current) {
-            setChats([]);
-            setLoading(false);
-          }
-          return;
-        }
-
-        const myChatIds = myParticipations.map(c => c.chat_id);
-
-        // 3. Fetch Participants to find partners
-        const { data: allParticipants, error: participantsError } = await supabase
-           .from('chat_participants')
-           .select('chat_id, user_id')
-           .in('chat_id', myChatIds);
-           
-        if (participantsError) throw participantsError;
-
-        // 4. Identify Partners
-        const partnerRows = allParticipants.filter(p => p.user_id !== user.id);
-        const partnerUserIds = [...new Set(partnerRows.map(p => p.user_id))];
-
-        // 5. Fetch Partner Profiles
-        let profilesMap: Record<string, any> = {};
-        if (partnerUserIds.length > 0) {
-            const { data: profiles } = await supabase
-                .from('profiles')
-                .select('*')
-                .in('id', partnerUserIds);
-            
-            if (profiles) {
-                profiles.forEach(p => {
-                    profilesMap[p.id] = p;
-                });
-            }
-        }
-
-        // 6. Fetch Last Messages 
-        const formattedChats: Chat[] = [];
-
-        for (const chatId of myChatIds) {
-            const partnerRow = partnerRows.find(p => p.chat_id === chatId);
-            const partnerProfile = partnerRow ? profilesMap[partnerRow.user_id] : null;
-            const partnerId = partnerRow?.user_id;
-
-            // Fetch last message
-            const { data: lastMsg } = await supabase
-                .from('messages')
-                .select('text, created_at, read, sender_id')
-                .eq('chat_id', chatId)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-            // Count unread messages 
-            const { count: unreadCount } = await supabase
-                .from('messages')
-                .select('id', { count: 'exact', head: true })
-                .eq('chat_id', chatId)
-                .eq('read', false)
-                .neq('sender_id', user.id);
-
-            formattedChats.push({
-                id: chatId,
-                name: partnerProfile?.name || 'Unknown User',
-                avatar: partnerProfile?.avatar || 'bg-gray-400',
-                lastMessage: lastMsg?.text || 'No messages yet',
-                timestamp: lastMsg?.created_at || '1970-01-01T00:00:00Z', 
-                unread: unreadCount || 0,
-                online: partnerId ? onlineUsers.has(partnerId) : false,
-                participantId: partnerId,
-            });
-        }
-
-        // Sort: Newest timestamp first
-        formattedChats.sort((a, b) => {
-            const timeA = new Date(a.timestamp).getTime();
-            const timeB = new Date(b.timestamp).getTime();
-            return timeB - timeA;
-        });
-        
-        if (isMounted.current) setChats(formattedChats);
-
-      } catch (err: any) {
-        console.error('Error in ChatList:', err);
-        if (isMounted.current) setError(err.message);
-      } finally {
-        if (isMounted.current) {
-          setLoading(false);
-          clearTimeout(safetyTimer);
-        }
-      }
     };
-
-    fetchData();
     
-    const interval = setInterval(() => {
-        if (document.visibilityState === 'visible' && isMounted.current) {
-           // We do a simplified fetch here or rely on subscription?
-           // For now re-running full fetch is expensive but safe
-           // Better to optimize later.
-           fetchData();
-        }
-    }, 5000); 
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
         isMounted.current = false;
         clearInterval(interval);
-        clearTimeout(safetyTimer);
-    };
-  }, [onlineUsers]); 
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
+  }, []);
 
-  if (loading) {
+  // 3. Compute Display Data (merging online status from Realtime + DB)
+  const displayChats = useMemo(() => {
+      return chats.map(chat => {
+          const presenceOnline = chat.participantId ? onlineUsers.has(chat.participantId) : false;
+          const dbOnline = isUserOnline(chat.lastSeen);
+          
+          const isOnline = presenceOnline || dbOnline;
+          
+          return {
+              ...chat,
+              online: isOnline,
+              isOnline: isOnline
+          };
+      });
+  }, [chats, onlineUsers]);
+
+  if (loading && chats.length === 0) {
     return (
       <div className="h-full w-full flex items-center justify-center bg-white">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
@@ -183,14 +211,14 @@ export function ChatList({ onSelectChat, onOpenContacts, onOpenProfile }: ChatLi
     );
   }
 
-  if (error) {
+  if (error && chats.length === 0) {
       return (
           <div className="p-8 text-center text-red-600 bg-red-50 h-full flex flex-col items-center justify-center">
-              <h3 className="text-lg font-bold mb-2">Database Error</h3>
-              <p className="max-w-md text-sm">{error}</p>
+              <h3 className="text-lg font-bold mb-2">Connection Issue</h3>
+              <p className="max-w-md text-sm mb-4">We're having trouble connecting to your chats.</p>
               <button 
-                onClick={() => window.location.reload()}
-                className="mt-4 px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200"
+                onClick={() => { setLoading(true); setError(null); fetchChats(); }}
+                className="px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200"
               >
                 Retry
               </button>
@@ -200,10 +228,10 @@ export function ChatList({ onSelectChat, onOpenContacts, onOpenProfile }: ChatLi
 
   return (
     <ChatListScreen
-      chats={chats}
+      chats={displayChats}
       currentUser={currentUser}
       onChatClick={(chatId) => {
-        const chat = chats.find(c => c.id === chatId);
+        const chat = displayChats.find(c => c.id === chatId);
         if (chat) onSelectChat(chat);
       }}
       onNewChat={onOpenContacts}
