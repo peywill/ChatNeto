@@ -43,7 +43,7 @@ export function SignupScreen({ onSignup, onSwitchToLogin, errorMessage }: Signup
         
         // Timeout protection
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timed out. Please check your internet connection.')), 15000)
+          setTimeout(() => reject(new Error('Connection timed out. Please check your internet connection.')), 10000)
         );
 
         const data: any = await Promise.race([
@@ -55,17 +55,9 @@ export function SignupScreen({ onSignup, onSwitchToLogin, errorMessage }: Signup
           if (data?.session) {
              onSignup(data.session);
           } else if (data?.user) {
-             // If we have a user but no session, check if we can auto-login or if email confirmation is required
-             if (data.user.confirmed_at || data.user.email_confirmed_at) {
-                // Should have session. If not, try to login?
-                setError('Account created. Please log in.');
+             if (!data.session) {
+                setError('Account created! Please check your email to confirm.');
                 setLoading(false);
-                setTimeout(onSwitchToLogin, 1500);
-             } else {
-                 // Even if confirmation is off, sometimes session is null if implicit flow is off?
-                 // But we configured it to be implicit. 
-                 // We will assume success and try to redirect to login if session missing.
-                 onSignup(data.session); 
              }
           }
         }

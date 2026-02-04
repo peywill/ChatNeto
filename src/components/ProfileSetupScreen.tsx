@@ -4,7 +4,6 @@ import { updateProfile, supabase } from '../lib/auth';
 
 interface ProfileSetupScreenProps {
   initialName?: string;
-  userId?: string;
   onComplete: () => void;
 }
 
@@ -19,58 +18,33 @@ const avatarColors = [
   'bg-orange-400',
 ];
 
-export function ProfileSetupScreen({ initialName = '', userId: propUserId, onComplete }: ProfileSetupScreenProps) {
+export function ProfileSetupScreen({ initialName = '', onComplete }: ProfileSetupScreenProps) {
   const [name, setName] = useState(initialName);
   const [selectedAvatar, setSelectedAvatar] = useState(avatarColors[0]);
   const [loading, setLoading] = useState(false);
-  const [userId, setUserId] = useState<string | null>(propUserId || null);
+  const [userId, setUserId] = useState<string | null>(null);
   
   const isMounted = useRef(true);
 
   useEffect(() => {
     isMounted.current = true;
     
-    const loadUserData = async () => {
-      let currentUserId = userId;
-      
-      if (!currentUserId) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user && isMounted.current) {
-          setUserId(user.id);
-          currentUserId = user.id;
-        }
+    // Get current user
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user && isMounted.current) {
+        setUserId(user.id);
       }
-
-      if (currentUserId) {
-        try {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', currentUserId)
-              .single();
-              
-            if (profile && isMounted.current) {
-              if (profile.name && !name) setName(profile.name);
-              if (profile.avatar) setSelectedAvatar(profile.avatar);
-            }
-        } catch (e: any) {
-            if (!e?.message?.includes('fetch')) {
-                console.error("Error loading user data for setup:", e);
-            }
-        }
-      }
-    };
-
-    loadUserData();
+    });
     
     return () => { isMounted.current = false; };
-  }, [userId]);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (name.trim() && userId) {
       setLoading(true);
       try {
+        // Safety timeout
         const timeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Connection timed out.')), 8000)
         );
@@ -86,10 +60,9 @@ export function ProfileSetupScreen({ initialName = '', userId: propUserId, onCom
         if (isMounted.current) {
            onComplete();
         }
-      } catch (error: any) {
-        if (!error?.message?.includes('fetch') && !error?.message?.includes('timed out')) {
-            console.error('Error updating profile:', error);
-        }
+      } catch (error) {
+        console.error('Error updating profile:', error);
+        // Even if it fails, let them proceed, don't block them forever
         if (isMounted.current) {
            onComplete();
         }
@@ -99,13 +72,9 @@ export function ProfileSetupScreen({ initialName = '', userId: propUserId, onCom
         }
       }
     } else if (!userId) {
-       onComplete(); 
+       console.error("No user ID found");
+       onComplete(); // Escape hatch
     }
-  };
-
-  const getAvatarText = (n: string) => {
-     if (!n) return '';
-     return n.trim();
   };
 
   return (
@@ -120,14 +89,8 @@ export function ProfileSetupScreen({ initialName = '', userId: propUserId, onCom
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="flex flex-col items-center">
-            <div className={`w-24 h-24 ${selectedAvatar} rounded-full mb-6 flex items-center justify-center text-white text-3xl font-semibold overflow-hidden`}>
-              {name ? (
-                  <span className="text-sm text-center px-2 break-words leading-tight">
-                    {getAvatarText(name)}
-                  </span>
-              ) : (
-                  <User className="w-12 h-12" />
-              )}
+            <div className={`w-24 h-24 ${selectedAvatar} rounded-full mb-6 flex items-center justify-center text-white text-3xl font-semibold`}>
+              {name.charAt(0).toUpperCase() || <User className="w-12 h-12" />}
             </div>
             <p className="text-sm text-gray-600 mb-3">Choose avatar color</p>
             <div className="grid grid-cols-4 gap-3 max-w-xs">

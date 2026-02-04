@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ArrowLeft, Send, MoreVertical, Trash2, User } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { supabase } from '../lib/auth';
-import { getChatMessages, sendMessage, subscribeToChat, markMessagesAsRead } from '../lib/chat';
+import { getChatMessages, sendMessage, subscribeToMessages, markMessagesAsRead } from '../lib/chat';
 
 export interface Message {
   id: string;
@@ -23,7 +23,6 @@ interface ChatScreenProps {
   participantAvatar: string;
   participantIsOnline?: boolean;
   onBack: () => void;
-  onViewProfile?: (userId: string) => void;
 }
 
 export function ChatScreen({
@@ -33,21 +32,13 @@ export function ChatScreen({
   participantAvatar,
   participantIsOnline,
   onBack,
-  onViewProfile,
 }: ChatScreenProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  
-  // Typing indicator state
-  const [isTyping, setIsTyping] = useState(false);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastTypingSentRef = useRef<number>(0);
-  const channelRef = useRef<{ sendTyping: (uid: string) => void } | null>(null);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -55,7 +46,7 @@ export function ChatScreen({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isTyping]);
+  }, [messages]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -69,7 +60,7 @@ export function ChatScreen({
   // Initial load and subscription
   useEffect(() => {
     let mounted = true;
-    let subscription: { unsubscribe: () => void; sendTyping: (uid: string) => void } | undefined;
+    let unsubscribe: (() => void) | undefined;
 
     async function loadChat() {
       try {
@@ -89,59 +80,21 @@ export function ChatScreen({
         // Mark as read
         await markMessagesAsRead(chatId, user.id);
 
-        // Subscribe to chat events (Messages, Updates, Typing)
-        subscription = subscribeToChat(
-          chatId,
-          {
-            onMessage: (newMessage) => {
-              if (mounted) {
-                setMessages(prev => {
-                  if (prev.find(m => m.id === newMessage.id)) return prev;
-                  return [...prev, newMessage];
-                });
-                
-                // If message is from other person, stop typing indicator immediately
-                if (newMessage.sender_id !== user.id) {
-                    setIsTyping(false);
-                    if (typingTimeoutRef.current) {
-                        clearTimeout(typingTimeoutRef.current);
-                    }
-                    markMessagesAsRead(chatId, user.id);
-                }
-              }
-            },
-            onMessageUpdate: (updatedMessage) => {
-               if (mounted) {
-                 setMessages(prev => prev.map(m => 
-                   m.id === updatedMessage.id ? { ...m, ...updatedMessage } : m
-                 ));
-               }
-            },
-            onTyping: (userId) => {
-              if (mounted && userId !== user.id) {
-                setIsTyping(true);
-                // Clear existing timeout
-                if (typingTimeoutRef.current) {
-                  clearTimeout(typingTimeoutRef.current);
-                }
-                // Auto-hide typing after 3 seconds of no signals
-                typingTimeoutRef.current = setTimeout(() => {
-                  if (mounted) setIsTyping(false);
-                }, 3000);
-              }
-            }
-          }
-        );
-        
-        if (mounted) {
-            channelRef.current = subscription;
-        }
+        // Subscribe to new messages
+        unsubscribe = subscribeToMessages(chatId, (newMessage) => {
+           if (mounted) {
+             setMessages(prev => {
+                if (prev.find(m => m.id === newMessage.id)) return prev;
+                return [...prev, newMessage as unknown as Message];
+             });
+             if (newMessage.sender_id !== user.id) {
+                 markMessagesAsRead(chatId, user.id);
+             }
+           }
+        });
 
-      } catch (err: any) {
-        const msg = err?.message || '';
-        if (!msg.includes('fetch') && !msg.includes('network')) {
-             console.error("Failed to load chat", err);
-        }
+      } catch (err) {
+        console.error("Failed to load chat", err);
         if (mounted) setLoading(false);
       }
     }
@@ -150,8 +103,7 @@ export function ChatScreen({
 
     return () => {
       mounted = false;
-      if (subscription) subscription.unsubscribe();
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (unsubscribe) unsubscribe();
     };
   }, [chatId]);
 
@@ -177,32 +129,19 @@ export function ChatScreen({
     try {
       await sendMessage(chatId, currentUserId, text);
       setMessages(prev => prev.filter(m => m.id !== tempId));
-    } catch (err: any) {
-      const msg = err?.message || '';
-      if (!msg.includes('fetch') && !msg.includes('network')) {
-          console.error("Failed to send", err);
-      }
+    } catch (err) {
+      console.error("Failed to send", err);
       setMessages(prev => prev.map(m => 
         m.id === tempId ? { ...m, sending: false, error: true } : m
       ));
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInputText(e.target.value);
-    
-    // Send typing signal (throttled to once every 2 seconds)
-    if (currentUserId && channelRef.current) {
-        const now = Date.now();
-        if (now - lastTypingSentRef.current > 2000) {
-            channelRef.current.sendTyping(currentUserId);
-            lastTypingSentRef.current = now;
-        }
-    }
-  };
-
   const handleDeleteChat = async () => {
      if (confirm('Are you sure you want to delete this chat? This action cannot be undone.')) {
+         // In a real app, we would call a delete API. 
+         // For now, we'll just clear the local view and go back.
+         // Implementing full delete requires cascading deletes in DB which is risky for a prototype.
          alert("Chat deletion would happen here.");
          onBack();
      }
@@ -223,22 +162,13 @@ export function ChatScreen({
                  <span className="text-lg font-medium">{participantName.charAt(0).toUpperCase()}</span>
              )}
           </div>
-          {participantIsOnline && !isTyping && (
+          {participantIsOnline && (
             <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 rounded-full border-2 border-blue-500" />
           )}
         </div>
-        <div 
-            className="flex-1 min-w-0 cursor-pointer hover:opacity-90"
-            onClick={() => onViewProfile && onViewProfile(participantId)}
-        >
+        <div className="flex-1 min-w-0">
           <div className="font-medium truncate text-lg">{participantName}</div>
-          <div className="text-xs text-blue-100 h-4 flex items-center">
-            {isTyping ? (
-                <span className="animate-pulse font-medium text-white">typing...</span>
-            ) : (
-                participantIsOnline ? 'online' : 'offline'
-            )}
-          </div>
+          <div className="text-xs text-blue-100">{participantIsOnline ? 'online' : 'offline'}</div>
         </div>
         
         {/* Menu Button */}
@@ -258,10 +188,7 @@ export function ChatScreen({
                 <div className="absolute right-0 top-10 w-48 bg-white rounded-lg shadow-xl py-1 text-gray-800 z-50 border border-gray-100 animate-in fade-in zoom-in-95 duration-100 origin-top-right">
                     <button 
                         className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2"
-                        onClick={() => {
-                            setMenuOpen(false);
-                            if (onViewProfile) onViewProfile(participantId);
-                        }}
+                        onClick={() => alert("Profile View Coming Soon")}
                     >
                         <User className="w-4 h-4 text-gray-500" />
                         <span>View Profile</span>
@@ -317,7 +244,7 @@ export function ChatScreen({
           <input
             type="text"
             value={inputText}
-            onChange={handleInputChange}
+            onChange={(e) => setInputText(e.target.value)}
             placeholder="Message"
             className="flex-1 px-5 py-3 border border-gray-200 bg-gray-50 rounded-full focus:outline-none focus:border-blue-500 focus:bg-white transition-all shadow-sm"
           />

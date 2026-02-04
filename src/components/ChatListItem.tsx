@@ -40,11 +40,6 @@ export function ChatListItem({ chat, onClick }: ChatListItemProps) {
     }
   };
 
-  const getAvatarText = (name: string) => {
-    if (!name) return '?';
-    return name.trim();
-  };
-
   return (
     <button
       onClick={onClick}
@@ -58,9 +53,7 @@ export function ChatListItem({ chat, onClick }: ChatListItemProps) {
             <img src={chat.avatar} alt={chat.name} className="w-full h-full object-cover" />
           ) : (
              // Fallback if avatar is just a color class
-            <span className="text-[10px] font-medium leading-tight px-1 text-center break-words w-full">
-                {getAvatarText(chat.name)}
-            </span>
+            <span className="text-lg font-medium">{chat.name.charAt(0).toUpperCase()}</span>
           )}
         </div>
         {chat.online && (

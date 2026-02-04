@@ -16,31 +16,20 @@ export function ProfileScreen({ onBack, onLogout }: ProfileScreenProps) {
       try {
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
-          const { data: profile, error } = await supabase
+          const { data: profile } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', authUser.id)
             .single();
             
-          if (error) {
-              // Ignore network/fetch errors
-              if (error.message?.includes('fetch') || error.message?.includes('network')) {
-                  console.warn('Profile load network issue (using auth defaults)');
-              } else {
-                  console.error("Error loading profile:", error);
-              }
-          }
-
           setUser({
             name: profile?.name || authUser.email?.split('@')[0],
             email: authUser.email,
             avatar: profile?.avatar || 'bg-blue-400'
           });
         }
-      } catch (error: any) {
-        if (!error?.message?.includes('fetch') && !error?.message?.includes('network')) {
-             console.error("Error loading profile", error);
-        }
+      } catch (error) {
+        console.error("Error loading profile", error);
       } finally {
         setLoading(false);
       }
@@ -55,10 +44,8 @@ export function ProfileScreen({ onBack, onLogout }: ProfileScreenProps) {
         await updateProfile(authUser.id, { name, avatar });
         setUser({ ...user, name, avatar });
       }
-    } catch (error: any) {
-      if (!error?.message?.includes('fetch')) {
-          console.error('Error updating profile:', error);
-      }
+    } catch (error) {
+      console.error('Error updating profile:', error);
     }
   };
 

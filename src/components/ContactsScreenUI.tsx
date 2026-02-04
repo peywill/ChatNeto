@@ -24,11 +24,6 @@ export function ContactsScreenUI({ contacts, onBack, onContactClick }: ContactsS
     contact.phone.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const getAvatarText = (name: string) => {
-    if (!name) return '?';
-    return name.trim();
-  };
-
   return (
     <div className="h-full w-full flex flex-col bg-white">
       {/* Header */}
@@ -69,10 +64,8 @@ export function ContactsScreenUI({ contacts, onBack, onContactClick }: ContactsS
               className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 active:bg-gray-100 transition-colors border-b border-gray-100"
             >
               <div className="relative">
-                <div className={`w-12 h-12 ${contact.avatar} rounded-full flex items-center justify-center text-white flex-shrink-0 overflow-hidden`}>
-                  <span className="text-[10px] font-medium leading-tight px-1 text-center break-words w-full">
-                    {getAvatarText(contact.name)}
-                  </span>
+                <div className={`w-12 h-12 ${contact.avatar} rounded-full flex items-center justify-center text-white flex-shrink-0`}>
+                  {contact.name.charAt(0).toUpperCase()}
                 </div>
                 {contact.online && (
                   <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />

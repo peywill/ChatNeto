@@ -1,15 +1,14 @@
 import { useState, useEffect } from 'react';
 import { ContactsScreenUI, Contact } from './ContactsScreenUI';
-import { supabase, isUserOnline } from '../lib/auth';
+import { supabase } from '../lib/auth';
 import { getOrCreateChat } from '../lib/chat';
 
 interface ContactsScreenProps {
-  onlineUsers?: Set<string>;
   onBack: () => void;
   onSelectContact: (chat: any) => void;
 }
 
-export function ContactsScreen({ onlineUsers, onBack, onSelectContact }: ContactsScreenProps) {
+export function ContactsScreen({ onBack, onSelectContact }: ContactsScreenProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +22,7 @@ export function ContactsScreen({ onlineUsers, onBack, onSelectContact }: Contact
         if (!user) return;
 
         // Fetch all profiles except self
+        // In a real app, you'd fetch from a 'contacts' table, but for now getting all users is fine for testing
         const { data: profiles, error: fetchError } = await supabase
           .from('profiles')
           .select('*')
@@ -31,36 +31,18 @@ export function ContactsScreen({ onlineUsers, onBack, onSelectContact }: Contact
         if (fetchError) throw fetchError;
 
         if (profiles && mounted) {
-          const formattedContacts = profiles.map(p => {
-             const presenceOnline = onlineUsers ? onlineUsers.has(p.id) : false;
-             const dbOnline = isUserOnline(p.last_seen);
-             
-             return {
-                id: p.id,
-                name: p.name || 'Unknown',
-                avatar: p.avatar || 'bg-gray-400',
-                phone: p.email || '', 
-                email: p.email || '',
-                online: presenceOnline || dbOnline
-             };
-          });
+          const formattedContacts = profiles.map(p => ({
+            id: p.id,
+            name: p.name || 'Unknown',
+            avatar: p.avatar || 'bg-gray-400',
+            phone: p.email || '', // Use email as phone/handle
+            email: p.email || '',
+            online: false 
+          }));
           setContacts(formattedContacts);
         }
       } catch (err: any) {
-        // Suppress network errors from console
-        const msg = err?.message || '';
-        if (
-             msg.includes('fetch') || 
-             msg.includes('network') || 
-             msg.includes('aborted') ||
-             err?.name === 'TypeError' ||
-             err?.name === 'AbortError'
-        ) {
-            // Ignored
-        } else {
-            console.error('Error fetching contacts:', err);
-        }
-        
+        console.error('Error fetching contacts:', err);
         if (mounted) setError('Failed to load contacts.');
       } finally {
         if (mounted) setLoading(false);
@@ -69,7 +51,7 @@ export function ContactsScreen({ onlineUsers, onBack, onSelectContact }: Contact
 
     fetchContacts();
     return () => { mounted = false; };
-  }, [onlineUsers]);
+  }, []);
 
   const handleContactClick = async (contactId: string) => {
     const contact = contacts.find(c => c.id === contactId);
@@ -79,29 +61,20 @@ export function ContactsScreen({ onlineUsers, onBack, onSelectContact }: Contact
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Use the centralized chat creation logic
+      // This handles all the complexity of database columns vs tables
       const newChat = await getOrCreateChat(user.id, contactId);
 
       onSelectContact({
         id: newChat.id,
         participantId: contact.id,
         name: contact.name,
-        avatar: contact.avatar,
-        online: contact.online
+        avatar: contact.avatar
       });
 
     } catch (err: any) {
-      const msg = err?.message || '';
-      const isNetwork = msg.includes('fetch') || msg.includes('network') || err?.name === 'TypeError';
-      
-      if (!isNetwork) {
-         console.error('Error creating chat:', err);
-      }
-      
-      if (isNetwork) {
-         alert('Network connection failed. Please check your internet.');
-      } else {
-         alert(`Failed to start chat: ${msg || 'Unknown error'}`);
-      }
+      console.error('Error creating chat:', err);
+      alert(`Failed to start chat: ${err.message}`);
     }
   };
 
