@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings, Server, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Settings, Server, AlertCircle, CheckCircle2, Terminal } from 'lucide-react';
 import { ChatNetoLogo } from './ChatNetoLogo';
 import { signIn, supabase } from '../lib/auth';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from './ui/dialog';
@@ -25,12 +25,17 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
   const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'error'>('checking');
   const [currentUrl, setCurrentUrl] = useState('');
 
+  // Debug Logs State
+  const [logs, setLogs] = useState<string[]>([]);
+  const addLog = (msg: string) => setLogs(prev => [...prev, `${new Date().toLocaleTimeString().split(' ')[0]}: ${msg}`]);
+
   // Use useRef to track mounted state reliably across async operations
   const isMounted = useRef(true);
 
   useEffect(() => {
     isMounted.current = true;
     checkConnection();
+    addLog('Login Screen Mounted. Ready.');
     return () => { isMounted.current = false; };
   }, []);
 
@@ -39,18 +44,22 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
     const url = supabase.supabaseUrl;
     setCurrentUrl(url);
     
-    // Simple ping to check connectivity
-    const start = Date.now();
     try {
-      // Just check if we can reach the server. Auth endpoint usually responds quickly.
-      // We don't need a valid session, just a valid server.
+      addLog(`Checking connection to ${url?.substring(0, 15)}...`);
       const { error } = await supabase.auth.getSession();
       if (isMounted.current) {
-        setConnectionStatus('connected');
+        if (error) {
+            setConnectionStatus('error');
+            addLog('Connection Check Failed: ' + error.message);
+        } else {
+            setConnectionStatus('connected');
+            addLog('Connection Check: OK');
+        }
       }
-    } catch (e) {
+    } catch (e: any) {
       if (isMounted.current) {
         setConnectionStatus('error');
+        addLog('Connection Exception: ' + e.message);
       }
     }
   };
@@ -69,7 +78,6 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
       return;
     }
 
-    // Basic validation to help the user
     if (trimmedKey.startsWith('sb_')) {
       alert("It looks like you pasted a Publishable Key (starts with sb_). Please use the Anon Key (starts with ey...).");
       return;
@@ -79,7 +87,6 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
       localStorage.setItem('chatneto-supabase-url', trimmedUrl);
       localStorage.setItem('chatneto-supabase-key', trimmedKey);
       
-      // Visual feedback before reload
       const button = document.getElementById('save-connection-btn');
       if (button) button.innerText = "Saved! Reloading...";
       
@@ -102,32 +109,41 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
 
     setLoading(true);
     setError('');
+    addLog('--- Starting Login Process ---');
+    addLog(`Email: ${email}`);
     
     try {
-      // Reduced timeout to 8s
+      // Reduced timeout to 15s to be safe
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connection timed out. Please check your internet connection.')), 8000)
+        setTimeout(() => reject(new Error('Connection timed out (15s limit).')), 15000)
       );
 
+      addLog('Calling signIn...');
       const data: any = await Promise.race([
         signIn(email, password),
         timeoutPromise
       ]);
       
-      // Check current value of ref, not a captured variable
+      addLog('SignIn resolved.');
+      
       if (isMounted.current) {
         if (data?.session) {
+           addLog('Session found! ID: ' + data.session.user.id.substring(0,5));
+           addLog('Calling onLogin callback...');
            onLogin(data.session);
+           addLog('onLogin called. Waiting for redirect...');
         } else if (data?.user && !data?.session) {
-           // Should not happen if email confirmation is disabled
-           setError('Unable to establish session. Please try again.');
+           addLog('User found but NO SESSION.');
+           setError('Unable to establish session. Email verification might be required?');
            setLoading(false);
         } else {
+           addLog('No session and no user returned.');
            throw new Error('Login succeeded but no session was created.');
         }
       }
     } catch (err: any) {
       console.error('Login error:', err);
+      addLog('ERROR CAUGHT: ' + err.message);
       if (isMounted.current) {
         if (err.message && err.message.includes('Invalid login credentials')) {
            setError('Invalid credentials. Please check your email and password.');
@@ -199,7 +215,23 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
           >
             Don't have an account? Sign up
           </button>
+          
+          <div className="mt-6 flex flex-col items-center gap-1">
+             <div className="text-xs text-gray-300 font-mono">v1.3 (Debug Mode)</div>
+          </div>
         </div>
+      </div>
+      
+      {/* Debug Console */}
+      <div className="w-full max-w-sm mt-8 border border-gray-200 rounded-md overflow-hidden bg-gray-50">
+         <div className="bg-gray-100 px-3 py-1 text-xs font-bold text-gray-500 flex items-center gap-2">
+            <Terminal className="w-3 h-3" /> Debug Logs
+         </div>
+         <div className="h-32 overflow-y-auto p-2 font-mono text-xs text-gray-600 space-y-1">
+            {logs.length === 0 ? <span className="text-gray-400 italic">Logs will appear here...</span> : logs.map((log, i) => (
+                <div key={i} className="border-b border-gray-100 pb-0.5 last:border-0">{log}</div>
+            ))}
+         </div>
       </div>
 
       {/* Connection Debugger / Settings */}
