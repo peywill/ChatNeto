@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { User } from 'lucide-react';
-import { updateProfile, supabase } from '../lib/auth';
+import { useState } from 'react';
+import { Camera, User } from 'lucide-react';
 
 interface ProfileSetupScreenProps {
-  initialName?: string;
-  onComplete: () => void;
+  initialName: string;
+  onComplete: (name: string, avatar: string) => void;
 }
 
 const avatarColors = [
@@ -18,62 +17,14 @@ const avatarColors = [
   'bg-orange-400',
 ];
 
-export function ProfileSetupScreen({ initialName = '', onComplete }: ProfileSetupScreenProps) {
+export function ProfileSetupScreen({ initialName, onComplete }: ProfileSetupScreenProps) {
   const [name, setName] = useState(initialName);
   const [selectedAvatar, setSelectedAvatar] = useState(avatarColors[0]);
-  const [loading, setLoading] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
-  
-  const isMounted = useRef(true);
 
-  useEffect(() => {
-    isMounted.current = true;
-    
-    // Get current user
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user && isMounted.current) {
-        setUserId(user.id);
-      }
-    });
-    
-    return () => { isMounted.current = false; };
-  }, []);
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (name.trim() && userId) {
-      setLoading(true);
-      try {
-        // Safety timeout
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timed out.')), 8000)
-        );
-
-        await Promise.race([
-          updateProfile(userId, {
-            name: name,
-            avatar: selectedAvatar
-          }),
-          timeoutPromise
-        ]);
-        
-        if (isMounted.current) {
-           onComplete();
-        }
-      } catch (error) {
-        console.error('Error updating profile:', error);
-        // Even if it fails, let them proceed, don't block them forever
-        if (isMounted.current) {
-           onComplete();
-        }
-      } finally {
-        if (isMounted.current) {
-          setLoading(false);
-        }
-      }
-    } else if (!userId) {
-       console.error("No user ID found");
-       onComplete(); // Escape hatch
+    if (name.trim()) {
+      onComplete(name, selectedAvatar);
     }
   };
 
@@ -114,17 +65,15 @@ export function ProfileSetupScreen({ initialName = '', onComplete }: ProfileSetu
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your name"
-              disabled={loading}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
             />
           </div>
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full bg-blue-500 text-white py-3 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+            className="w-full bg-blue-500 text-white py-3 rounded-lg hover:bg-blue-600 transition-colors"
           >
-            {loading ? 'Saving...' : 'Continue'}
+            Continue
           </button>
         </form>
       </div>

@@ -4,115 +4,72 @@ import type { Chat, Message, Contact, Profile } from './supabase-types';
 // Chat functions
 export async function getOrCreateChat(userId: string, otherUserId: string): Promise<Chat> {
   try {
-    // 1. Try to find existing chat using chat_participants (The "King Key" Way)
-    // This is more robust than checking columns on the chats table
-    
-    // Get all chat IDs for current user
-    const { data: myChats } = await supabase
-      .from('chat_participants')
-      .select('chat_id')
-      .eq('user_id', userId);
+    // Ensure participant1_id < participant2_id for the unique constraint
+    const [participant1, participant2] = [userId, otherUserId].sort();
 
-    if (myChats && myChats.length > 0) {
-        const myChatIds = myChats.map(c => c.chat_id);
+    // Check if chat exists
+    const { data: existingChat } = await supabase
+      .from('chats')
+      .select('*')
+      .eq('participant1_id', participant1)
+      .eq('participant2_id', participant2)
+      .single();
 
-        // Check if the other user is in any of these chats
-        const { data: commonChats } = await supabase
-           .from('chat_participants')
-           .select('chat_id')
-           .eq('user_id', otherUserId)
-           .in('chat_id', myChatIds)
-           .limit(1);
-
-        if (commonChats && commonChats.length > 0) {
-            // Found existing chat!
-            const existingChatId = commonChats[0].chat_id;
-            
-            // Fetch the chat details
-            const { data: existingChat } = await supabase
-                .from('chats')
-                .select('*')
-                .eq('id', existingChatId)
-                .single();
-                
-            if (existingChat) return existingChat;
-        }
+    if (existingChat) {
+      return existingChat;
     }
 
-    // 2. Create new chat
-    // We try to use the most compatible method
-    console.log('Creating new chat...');
-    
-    // First, create the chat row. 
-    // We try to insert with legacy columns if they exist, but if they fail, we fallback?
-    // Actually, we can't easily "try/catch" an insert.
-    // So we will assume the King Key SQL ran, which does NOT guarantee participant1_id columns.
-    // However, Supabase ignores extra fields in JS objects usually? No, it errors.
-    
-    // SAFEST APPROACH: Just create with minimal fields first.
-    // If we need the legacy columns, we'd know.
-    
+    // Create new chat
     const { data: newChat, error } = await supabase
       .from('chats')
       .insert({
-        last_message: 'New chat',
-        last_message_at: new Date().toISOString()
-        // We omit participant1_id/2_id here to be safe. 
-        // If the table requires them, the King Key SQL would have failed or needs them.
-        // But standard chat apps don't need them if using junction table.
+        participant1_id: participant1,
+        participant2_id: participant2,
       })
       .select()
       .single();
 
-    if (error) {
-        // Fallback: If it failed, maybe it REQUIRES participant columns (Legacy Schema)
-        console.warn('Standard create failed, trying legacy mode...', error);
-        const [p1, p2] = [userId, otherUserId].sort();
-        const { data: legacyChat, error: legacyError } = await supabase
-            .from('chats')
-            .insert({
-                participant1_id: p1,
-                participant2_id: p2,
-                last_message: 'New chat',
-                last_message_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-            
-        if (legacyError) throw legacyError;
-        
-        // Ensure participants are added (Legacy might rely on columns, but we want junction too)
-        await supabase
-          .from('chat_participants')
-          .insert([
-            { chat_id: legacyChat.id, user_id: userId },
-            { chat_id: legacyChat.id, user_id: otherUserId }
-          ]);
-          
-        return legacyChat;
-    }
-
-    // 3. Add to chat_participants table
-    if (newChat) {
-        await supabase
-          .from('chat_participants')
-          .insert([
-            { chat_id: newChat.id, user_id: userId },
-            { chat_id: newChat.id, user_id: otherUserId }
-          ]);
-    }
-
+    if (error) throw error;
     return newChat;
   } catch (error: any) {
-    console.error('getOrCreateChat error:', error);
+    // Ignore abort errors
+    if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
+      console.log('Get or create chat aborted (this is normal)');
+      throw error; // Re-throw to let caller handle
+    }
     throw error;
   }
 }
 
 export async function getUserChats(userId: string) {
-  // This function is deprecated in favor of the logic in ChatList.tsx
-  // But we keep it returning empty array to prevent crashes if called
-  return [];
+  try {
+    const { data, error } = await supabase
+      .from('chats')
+      .select(`
+        *,
+        participant1:profiles!chats_participant1_id_fkey(*),
+        participant2:profiles!chats_participant2_id_fkey(*)
+      `)
+      .or(`participant1_id.eq.${userId},participant2_id.eq.${userId}`)
+      .order('last_message_at', { ascending: false, nullsFirst: false });
+
+    if (error) {
+      // Ignore abort errors
+      if (error.message?.includes('aborted') || error.name === 'AbortError') {
+        console.log('Get chats aborted (this is normal)');
+        return [];
+      }
+      throw error;
+    }
+    return data || [];
+  } catch (error: any) {
+    // Ignore abort errors
+    if (error.message?.includes('aborted') || error.name === 'AbortError') {
+      console.log('Get chats aborted (this is normal)');
+      return [];
+    }
+    throw error;
+  }
 }
 
 // Message functions
@@ -125,25 +82,25 @@ export async function getChatMessages(chatId: string) {
       .order('created_at', { ascending: true });
 
     if (error) {
-      return [];
+      // Ignore abort errors
+      if (error.message?.includes('aborted') || error.name === 'AbortError') {
+        console.log('Get messages aborted (this is normal)');
+        return [];
+      }
+      throw error;
     }
     return data || [];
-  } catch (error) {
-    return [];
+  } catch (error: any) {
+    // Ignore abort errors
+    if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
+      console.log('Get messages aborted (this is normal)');
+      return [];
+    }
+    throw error;
   }
 }
 
 export async function sendMessage(chatId: string, senderId: string, text: string) {
-  // Update last message in chat
-  await supabase
-    .from('chats')
-    .update({ 
-        last_message: text,
-        last_message_at: new Date().toISOString()
-    })
-    .eq('id', chatId);
-
-  // Insert message
   const { data, error } = await supabase
     .from('messages')
     .insert({
@@ -159,28 +116,117 @@ export async function sendMessage(chatId: string, senderId: string, text: string
 }
 
 export async function markMessagesAsRead(chatId: string, userId: string) {
-  try {
-    await supabase
-        .from('messages')
-        .update({ read: true })
-        .eq('chat_id', chatId)
-        .neq('sender_id', userId);
-  } catch (e) {
-      console.log('Error marking read', e);
-  }
+  const { error } = await supabase
+    .from('messages')
+    .update({ read: true })
+    .eq('chat_id', chatId)
+    .neq('sender_id', userId);
+
+  if (error) throw error;
 }
 
-export async function getUserProfile(userId: string): Promise<Profile | null> {
-  const { data } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
+// Contact functions
+export async function getUserContacts(userId: string) {
+  const { data, error } = await supabase
+    .from('contacts')
+    .select(`
+      *,
+      contact:profiles!contacts_contact_id_fkey(*)
+    `)
+    .eq('user_id', userId);
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function addContact(userId: string, contactId: string) {
+  const { data, error } = await supabase
+    .from('contacts')
+    .insert({
+      user_id: userId,
+      contact_id: contactId,
+    })
+    .select()
     .single();
+
+  if (error) throw error;
   return data;
 }
 
-// Subscriptions
+export async function removeContact(userId: string, contactId: string) {
+  const { error } = await supabase
+    .from('contacts')
+    .delete()
+    .eq('user_id', userId)
+    .eq('contact_id', contactId);
+
+  if (error) throw error;
+}
+
+export async function searchUsers(query: string, currentUserId: string) {
+  try {
+    let queryBuilder = supabase
+      .from('profiles')
+      .select('*')
+      .neq('id', currentUserId);
+    
+    // Only add search filter if query is not empty
+    if (query && query.trim()) {
+      queryBuilder = queryBuilder.or(`name.ilike.%${query}%,email.ilike.%${query}%`);
+    }
+    
+    const { data, error } = await queryBuilder
+      .order('name', { ascending: true })
+      .limit(20);
+
+    if (error) {
+      // Ignore abort errors
+      if (error.message?.includes('aborted') || error.name === 'AbortError') {
+        return [];
+      }
+      throw error;
+    }
+    
+    // Return all users found (or empty array)
+    return data || [];
+  } catch (error: any) {
+    // Ignore abort errors
+    if (error.message?.includes('aborted') || error.name === 'AbortError') {
+      return [];
+    }
+    throw error;
+  }
+}
+
+// Get a specific user's profile (used for getting chat participant info with last_seen)
+export async function getUserProfile(userId: string): Promise<Profile | null> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      if (error.message?.includes('aborted') || error.name === 'AbortError') {
+        return null;
+      }
+      throw error;
+    }
+    
+    return data;
+  } catch (error: any) {
+    if (error.message?.includes('aborted') || error.name === 'AbortError') {
+      return null;
+    }
+    throw error;
+  }
+}
+
+// Real-time subscriptions
 export function subscribeToMessages(chatId: string, onMessage: (message: Message) => void) {
+  console.log('🔔 Setting up message subscription for chat:', chatId);
+  
   const channel = supabase
     .channel(`messages:${chatId}`)
     .on(
@@ -192,7 +238,43 @@ export function subscribeToMessages(chatId: string, onMessage: (message: Message
         filter: `chat_id=eq.${chatId}`,
       },
       (payload) => {
+        console.log('🔔 Real-time message received:', payload);
         onMessage(payload.new as Message);
+      }
+    )
+    .subscribe((status) => {
+      console.log('🔔 Subscription status:', status);
+    });
+
+  return () => {
+    console.log('🔔 Unsubscribing from messages:', chatId);
+    supabase.removeChannel(channel);
+  };
+}
+
+export function subscribeToChats(userId: string, onChatUpdate: () => void) {
+  const channel = supabase
+    .channel(`chats:${userId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'chats',
+      },
+      () => {
+        onChatUpdate();
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'messages',
+      },
+      () => {
+        onChatUpdate();
       }
     )
     .subscribe();

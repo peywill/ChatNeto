@@ -1,27 +1,47 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Safe environment variable access helper
-const getEnv = (key: string, defaultValue: string) => {
-  try {
-    // Check if import.meta.env exists to prevent "Cannot read properties of undefined" errors
-    // @ts-ignore - import.meta might not be typed in all contexts
-    if (typeof import.meta !== 'undefined' && import.meta.env) {
-      // @ts-ignore
-      return import.meta.env[key] || defaultValue;
-    }
-  } catch (e) {
-    // Ignore errors in environments where import.meta is not supported
-  }
-  return defaultValue;
-};
-
-// Use environment variables if available, otherwise fall back to hardcoded values
-const supabaseUrl = getEnv('VITE_SUPABASE_URL', 'https://eepaswqrmehdcccfqjpm.supabase.co');
-const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY', 'sb_publishable_aEz4eudRlGBb6U0GLwvHFg_AzGevdd8');
+const supabaseUrl = 'https://eepaswqrmehdcccfqjpm.supabase.co';
+const supabaseAnonKey = 'sb_publishable_aEz4eudRlGBb6U0GLwvHFg_AzGevdd8';
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables');
+  throw new Error('Missing Supabase environment variables');
 }
+
+// TEMPORARILY DISABLED - Allow console logs for debugging
+// const originalConsoleError = console.error;
+// const originalConsoleWarn = console.warn;
+// const originalConsoleLog = console.log;
+
+// const shouldSuppressError = (...args: any[]): boolean => {
+//   const combined = args.map(arg => {
+//     if (arg instanceof Error) return arg.name + ' ' + arg.message + ' ' + arg.stack;
+//     if (typeof arg === 'object') {
+//       try {
+//         return JSON.stringify(arg);
+//       } catch {
+//         return String(arg);
+//       }
+//     }
+//     return String(arg);
+//   }).join(' ').toLowerCase();
+  
+//   return combined.includes('abort') || combined.includes('signal');
+// };
+
+// console.error = (...args: any[]) => {
+//   if (shouldSuppressError(...args)) return;
+//   originalConsoleError.apply(console, args);
+// };
+
+// console.warn = (...args: any[]) => {
+//   if (shouldSuppressError(...args)) return;
+//   originalConsoleWarn.apply(console, args);
+// };
+
+// console.log = (...args: any[]) => {
+//   if (shouldSuppressError(...args)) return;
+//   originalConsoleLog.apply(console, args);
+// };
 
 // Also suppress window error events for AbortErrors
 if (typeof window !== 'undefined') {

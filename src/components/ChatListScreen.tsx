@@ -11,8 +11,6 @@ export interface Chat {
   timestamp: string;
   unread: number;
   online?: boolean;
-  participantId?: string; // Added optional participantId
-  isOnline?: boolean;     // Added optional isOnline
 }
 
 interface ChatListScreenProps {
@@ -41,37 +39,31 @@ export function ChatListScreen({
   return (
     <div className="h-full w-full flex flex-col bg-white">
       {/* Header */}
-      <div className="bg-blue-500 text-white px-4 py-3 flex-shrink-0 shadow-sm z-10">
+      <div className="bg-blue-500 text-white px-4 py-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <button onClick={onProfileClick} className="p-1 hover:bg-white/20 rounded transition-colors" aria-label="Menu">
+          <button onClick={onProfileClick} className="p-1 hover:bg-white/20 rounded transition-colors">
             <Menu className="w-6 h-6" />
           </button>
           <div className="flex items-center gap-2">
             <ChatNetoLogo className="w-7 h-7" />
-            <h1 className="text-xl font-semibold tracking-tight">ChatNeto</h1>
+            <h1 className="text-xl font-semibold">ChatNeto</h1>
           </div>
-          <div className="relative group">
-            <button 
-                onClick={onNewChat} 
-                className="p-1 hover:bg-white/20 rounded transition-colors"
-                aria-label="New Chat"
-            >
-                <Edit className="w-6 h-6" />
-            </button>
-            {/* Simple Tooltip */}
-            <div className="absolute top-full right-0 mt-1 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                New Chat
-            </div>
-          </div>
+          <button 
+            onClick={onNewChat} 
+            title="New Chat"
+            className="p-1 hover:bg-white/20 rounded transition-colors"
+          >
+            <Edit className="w-6 h-6" />
+          </button>
         </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
             type="text"
-            placeholder="Search chats..."
+            placeholder="Search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-full bg-white/20 text-white placeholder-blue-100/70 focus:outline-none focus:bg-white/30 transition-colors"
+            className="w-full pl-10 pr-4 py-2 rounded-full bg-white/20 text-white placeholder-white/70 focus:outline-none focus:bg-white/30"
           />
         </div>
       </div>
@@ -84,7 +76,7 @@ export function ChatListScreen({
             {!searchQuery && (
               <button
                 onClick={onNewChat}
-                className="mt-4 text-blue-500 hover:underline font-medium"
+                className="mt-4 text-blue-500 hover:underline"
               >
                 Start a new chat
               </button>
