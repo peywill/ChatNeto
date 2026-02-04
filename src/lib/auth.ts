@@ -1,5 +1,4 @@
 import { supabase } from './supabase';
-export { supabase };
 import type { Profile } from './supabase-types';
 
 export async function signUp(email: string, password: string, name: string, avatar: string) {
@@ -8,25 +7,10 @@ export async function signUp(email: string, password: string, name: string, avat
   try {
     // Sign up the user
     console.log('🔵 Step 1: Creating auth user...');
-    
-    // Create a timeout promise to race against the actual signup
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Request timed out')), 20000)
-    );
-
-    const { data, error } = await Promise.race([
-      supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: name,
-            avatar_url: avatar,
-          }
-        }
-      }),
-      timeoutPromise
-    ]) as any;
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
 
     if (error) {
       console.error('❌ Signup error:', error);
@@ -38,10 +22,10 @@ export async function signUp(email: string, password: string, name: string, avat
 
     console.log('✅ User created:', data.user.id);
 
-    // Wait a brief moment for auth to propagate locally
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Wait for auth to settle
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Check if profile already exists (in case of retry or trigger creation)
+    // Check if profile already exists (in case of retry)
     console.log('🔵 Step 2: Checking for existing profile...');
     const { data: existingProfile, error: checkError } = await supabase
       .from('profiles')
@@ -49,12 +33,8 @@ export async function signUp(email: string, password: string, name: string, avat
       .eq('id', data.user.id)
       .maybeSingle();
     
-    // Ignore abort/network errors when checking for existing profile
-    if (checkError && 
-        !checkError.message?.includes('aborted') && 
-        !checkError.message?.includes('fetch') &&
-        !checkError.message?.includes('Failed to fetch')
-    ) {
+    // Ignore abort errors when checking for existing profile
+    if (checkError && !checkError.message?.includes('aborted')) {
       console.error('Error checking profile:', checkError);
     }
 
@@ -69,18 +49,13 @@ export async function signUp(email: string, password: string, name: string, avat
         })
         .eq('id', data.user.id);
 
-      if (updateError && 
-          !updateError.message?.includes('aborted') &&
-          !updateError.message?.includes('fetch')
-      ) {
+      if (updateError && !updateError.message?.includes('aborted')) {
         console.error('❌ Error updating profile:', updateError);
-        // We don't throw here because the user is created and we can fix profile later
-      } else {
-        console.log('✅ Profile updated successfully!');
+        throw new Error(`Failed to update profile: ${updateError.message}`);
       }
+      console.log('✅ Profile updated successfully!');
     } else {
-      console.log('🔵 Step 3: Creating new profile manually...');
-      // Note: We might have a database trigger that does this automatically too
+      console.log('🔵 Step 3: Creating new profile...');
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
@@ -90,33 +65,20 @@ export async function signUp(email: string, password: string, name: string, avat
           avatar: avatar,
         });
 
-      if (profileError && 
-          !profileError.message?.includes('aborted') &&
-          !profileError.message?.includes('fetch') &&
-          // Ignore duplicate key error if trigger already created it
-          !profileError.message?.includes('duplicate key')
-      ) {
+      if (profileError && !profileError.message?.includes('aborted')) {
         console.error('❌ Error creating profile:', profileError);
-        // Don't throw, let them login
-      } else {
-        console.log('✅ Profile created successfully!');
+        throw new Error(`Failed to create profile: ${profileError.message}`);
       }
+      console.log('✅ Profile created successfully!');
     }
 
     console.log('🎉 Signup complete! Returning data...');
     return data;
   } catch (error: any) {
-    // Gracefully handle network/abort errors
-    if (
-      error?.name === 'AbortError' || 
-      error?.message?.includes('aborted') ||
-      error?.message?.includes('Failed to fetch') ||
-      error?.name === 'AuthRetryableFetchError'
-    ) {
-      console.log('Signup network issue (potentially transient):', error.message);
-      // If we got this far, it's possible the user WAS created but the response was lost.
-      // We will rethrow a more friendly error
-      throw new Error('Network connection unstable. Please try logging in if account creation succeeded.');
+    // Ignore abort errors
+    if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
+      console.log('Signup aborted (this is normal)');
+      throw error;
     }
     console.error('❌ Signup failed:', error);
     throw error;
@@ -124,30 +86,18 @@ export async function signUp(email: string, password: string, name: string, avat
 }
 
 export async function signIn(email: string, password: string) {
-  try {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
-    if (error) throw error;
-    return data;
-  } catch (error: any) {
-    if (error?.message?.includes('fetch') || error?.name === 'AuthRetryableFetchError') {
-       throw new Error('Network error. Please check your connection.');
-    }
-    throw error;
-  }
+  if (error) throw error;
+  return data;
 }
 
 export async function signOut() {
-  try {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-  } catch (error: any) {
-    // Ignore errors during signout (best effort)
-    console.warn('Signout warning:', error);
-  }
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
 }
 
 export async function getCurrentUser() {
@@ -158,7 +108,6 @@ export async function getCurrentUser() {
 
 export async function getProfile(userId: string): Promise<Profile | null> {
   try {
-    // Add retry logic or timeout
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -166,13 +115,9 @@ export async function getProfile(userId: string): Promise<Profile | null> {
       .single();
 
     if (error) {
-      // Ignore abort/fetch errors
-      if (
-        error.message?.includes('aborted') || 
-        error.message?.includes('FetchError') ||
-        error.message?.includes('Failed to fetch')
-      ) {
-        console.log('Profile fetch network issue (ignoring)');
+      // Ignore abort errors
+      if (error.message?.includes('aborted') || error.message?.includes('FetchError')) {
+        console.log('Profile fetch aborted (this is normal)');
         return null;
       }
       console.error('Error fetching profile:', error);
@@ -181,12 +126,8 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     return data;
   } catch (error: any) {
     // Ignore abort errors
-    if (
-        error?.name === 'AbortError' || 
-        error?.message?.includes('aborted') ||
-        error?.message?.includes('fetch')
-    ) {
-      console.log('Profile fetch aborted/failed (ignoring)');
+    if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
+      console.log('Profile fetch aborted (this is normal)');
       return null;
     }
     console.error('Error fetching profile:', error);
@@ -214,16 +155,12 @@ export async function updateLastSeen(userId: string) {
       .update({ last_seen: new Date().toISOString() })
       .eq('id', userId);
 
-    if (error && !error.message?.includes('aborted') && !error.message?.includes('fetch')) {
+    if (error && !error.message?.includes('aborted')) {
       console.error('Error updating last_seen:', error);
     }
   } catch (error: any) {
-    // Silently fail for abort/network errors
-    if (
-        error?.name === 'AbortError' || 
-        error?.message?.includes('aborted') ||
-        error?.message?.includes('fetch')
-    ) {
+    // Silently fail for abort errors
+    if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
       return;
     }
     console.error('Error updating last_seen:', error);
@@ -238,7 +175,7 @@ export function isUserOnline(lastSeen: string | undefined): boolean {
   const now = new Date();
   const diffMinutes = (now.getTime() - lastSeenDate.getTime()) / (1000 * 60);
   
-  // Consider user online if they were active within last 10 minutes (increased from 5)
-  // This gives more tolerance for mobile browsers backgrounding the app
-  return diffMinutes < 10;
+  // Consider user online if they were active within last 5 minutes (increased from 2)
+  // This gives more tolerance for the 30-second update interval
+  return diffMinutes < 5;
 }

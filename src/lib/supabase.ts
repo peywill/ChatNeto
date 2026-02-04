@@ -1,14 +1,49 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase configuration
 const supabaseUrl = 'https://eepaswqrmehdcccfqjpm.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlcGFzd3FybWVoZGNjY2ZxanBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1MTI0MDIsImV4cCI6MjA4NDA4ODQwMn0.nwo4Ys6BwkQwzZRJIVWoKpUHMRDRBoPFyl_BqBoptGQ';
+const supabaseAnonKey = 'sb_publishable_aEz4eudRlGBb6U0GLwvHFg_AzGevdd8';
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase credentials');
+  throw new Error('Missing Supabase environment variables');
 }
 
-// Suppress window error events for AbortErrors to prevent console noise
+// TEMPORARILY DISABLED - Allow console logs for debugging
+// const originalConsoleError = console.error;
+// const originalConsoleWarn = console.warn;
+// const originalConsoleLog = console.log;
+
+// const shouldSuppressError = (...args: any[]): boolean => {
+//   const combined = args.map(arg => {
+//     if (arg instanceof Error) return arg.name + ' ' + arg.message + ' ' + arg.stack;
+//     if (typeof arg === 'object') {
+//       try {
+//         return JSON.stringify(arg);
+//       } catch {
+//         return String(arg);
+//       }
+//     }
+//     return String(arg);
+//   }).join(' ').toLowerCase();
+  
+//   return combined.includes('abort') || combined.includes('signal');
+// };
+
+// console.error = (...args: any[]) => {
+//   if (shouldSuppressError(...args)) return;
+//   originalConsoleError.apply(console, args);
+// };
+
+// console.warn = (...args: any[]) => {
+//   if (shouldSuppressError(...args)) return;
+//   originalConsoleWarn.apply(console, args);
+// };
+
+// console.log = (...args: any[]) => {
+//   if (shouldSuppressError(...args)) return;
+//   originalConsoleLog.apply(console, args);
+// };
+
+// Also suppress window error events for AbortErrors
 if (typeof window !== 'undefined') {
   const originalOnError = window.onerror;
   window.onerror = (message, source, lineno, colno, error) => {
@@ -36,12 +71,12 @@ if (typeof window !== 'undefined') {
   };
 }
 
-// Create Supabase client with optimized settings
+// Create Supabase client with optimized settings to reduce AbortErrors
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: false,
+    detectSessionInUrl: false, // Disable URL session detection
     flowType: 'implicit',
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
     storageKey: 'chatneto-auth-token',
@@ -51,6 +86,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       'X-Client-Info': 'chatneto-app',
     },
   },
+  // Reduce polling frequency to minimize requests
   realtime: {
     params: {
       eventsPerSecond: 2,

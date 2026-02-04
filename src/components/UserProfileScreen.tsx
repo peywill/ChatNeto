@@ -41,11 +41,6 @@ export function UserProfileScreen({ user, onBack, onUpdateProfile, onLogout }: U
     setIsEditing(false);
   };
 
-  const getAvatarText = (name: string) => {
-    if (!name) return '?';
-    return name.trim();
-  };
-
   return (
     <div className="h-full w-full flex flex-col bg-gray-50">
       {/* Header */}
@@ -63,10 +58,8 @@ export function UserProfileScreen({ user, onBack, onUpdateProfile, onLogout }: U
       <div className="flex-1 overflow-y-auto">
         {/* Avatar Section */}
         <div className="bg-white py-8 flex flex-col items-center border-b border-gray-200">
-          <div className={`w-24 h-24 ${isEditing ? editAvatar : user.avatar} rounded-full flex items-center justify-center text-white text-3xl mb-4 font-medium overflow-hidden`}>
-            <span className="text-sm text-center px-2 break-words leading-tight">
-                {getAvatarText(isEditing ? editName : user.name)}
-            </span>
+          <div className={`w-24 h-24 ${isEditing ? editAvatar : user.avatar} rounded-full flex items-center justify-center text-white text-3xl mb-4`}>
+            {(isEditing ? editName : user.name).charAt(0).toUpperCase()}
           </div>
           
           {isEditing && (
