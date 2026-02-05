@@ -250,7 +250,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen w-full bg-gray-100 flex items-center justify-center font-sans">
-      <div className="w-full h-[100dvh] sm:h-[800px] sm:max-w-md sm:rounded-xl sm:shadow-2xl overflow-hidden bg-white relative">
+      <div className="w-full h-[100dvh] overflow-hidden bg-white relative shadow-2xl">
         {renderContent()}
       </div>
     </div>

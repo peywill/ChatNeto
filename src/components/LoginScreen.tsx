@@ -217,7 +217,7 @@ export function LoginScreen({ onLogin, onSwitchToSignup }: LoginScreenProps) {
           </button>
           
           <div className="mt-6 flex flex-col items-center gap-1">
-             <div className="text-xs text-gray-300 font-mono">v1.3 (Debug Mode)</div>
+             <div className="text-xs text-gray-300 font-mono">v1.5 (Hotfix)</div>
           </div>
         </div>
       </div>
