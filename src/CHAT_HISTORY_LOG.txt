@@ -1,0 +1,74 @@
+==========================================
+CHATNETO DEVELOPMENT LOG - FULL SESSION HISTORY
+Date: Saturday, January 31, 2026
+==========================================
+
+--- PART 1: INITIAL SETUP & DESIGN ---
+User requested a Telegram-style mobile chat app ("ChatNeto").
+- Design: Minimalist, flat, light colors, simple shapes.
+- Auth: Email/Password (Supabase), no phone numbers.
+- Infrastructure: Supabase (PostgreSQL) + Cloudflare Pages.
+
+Action:
+- Setup Supabase project.
+- Ran SQL for tables: profiles, chats, messages, contacts.
+- Implemented RLS policies and Triggers for auto-profile creation.
+
+--- PART 2: THE "INFINITE LOADING" BUG ---
+Problem:
+- App would hang on "Connecting..." or "Signing in..." screens indefinitely.
+- No error messages were shown, just a spinning wheel.
+
+Diagnosis:
+- Network requests to Supabase were sometimes hanging or failing silently.
+- State management (`isMounted`) caused memory leak warnings.
+
+Fix:
+- Added explicit timeout logic (8 seconds) to `LoginScreen.tsx` and `SignupScreen.tsx`.
+- Added `Promise.race` to force errors if the network is too slow.
+- Added `useRef` to track mounted state and prevent state updates on unmounted components.
+
+--- PART 3: THE LOGIN BUTTON & EMAIL VERIFICATION ---
+Problem:
+- After signing up, the Login button was unresponsive.
+- Users were stuck.
+
+Diagnosis:
+- Supabase defaults to requiring "Email Verification".
+- The app was silently failing because the user hadn't clicked the link in their email.
+- User explicitly requested: "I created this to be simple and fast. I don't want email verification."
+
+Fix:
+- User manually disabled "Confirm Email" in Supabase Dashboard -> Configuration -> Auth -> Providers -> Email.
+- Assistant updated `LoginScreen.tsx` to REMOVE the "Email not confirmed" error check.
+- Assistant updated `SignupScreen.tsx` to REMOVE the "Please check your email" message.
+- Result: Instant login upon signup.
+
+--- PART 4: THE "IDENTITY CRISIS" (LOGOUT BUG) ---
+Problem:
+- "In one browser logout doesn't work, and in the other login doesn't work."
+- Users were seeing data from other accounts or getting confused sessions.
+
+Diagnosis:
+- `signOut()` from Supabase wasn't clearing the browser's local storage fast enough.
+- Use of `localStorage` persisted old tokens, causing the app to think the old user was still there.
+
+Fix (The "Nuclear" Option):
+- Updated `App.tsx` handleLogout function.
+- Added `localStorage.clear()` to immediately wipe ALL browser data on logout.
+- Forced state reset: `setSession(null)` and `setCurrentScreen('login')`.
+
+--- PART 5: CURRENT STATUS (HANDOFF) ---
+The app is currently functional with the following behavior:
+1. Signup -> Immediate entry (No email check).
+2. Login -> Immediate entry.
+3. Logout -> Complete wipe of session (safe for shared devices).
+4. Styling -> Telegram-like minimal aesthetic.
+
+IMPORTANT FILES:
+- /lib/auth.ts: Contains Supabase wrappers.
+- /components/LoginScreen.tsx: Modified to ignore email verification.
+- /App.tsx: Contains the routing logic and the critical logout fix.
+
+READY FOR NEXT STEPS.
+==========================================
